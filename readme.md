@@ -20,7 +20,7 @@ DNSExfiltrator uses the system's default DNS server, but you can define a specif
 
 DNSExfiltrator also supports some throttling of the requests in order to stay more stealthy when exfiltrating data.
 
-<img src="https://dl.dropboxusercontent.com/s/fpg71h06xbwj33e/dnsexfiltrator_02.jpg?dl=0" width="600">
+<img src="https://dl.dropboxusercontent.com/s/fpg71h06xbwj33e/dnsexfiltrator_02.jpg?dl=0" width="800">
 
 <img src="https://dl.dropboxusercontent.com/s/7c2aqlf4kax3mu9/dnsexfiltrator_01.jpg?dl=0" width="600">
 
