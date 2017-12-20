@@ -124,7 +124,11 @@ if __name__ == '__main__':
 							fileHandle.close()
 							print color("[+] Output file [{}] saved successfully".format(outputFileName))
 					except IOError:
-						print color("[!] Could not write file [{}]".format(outputFileName))				
+						print color("[!] Could not write file [{}]".format(outputFileName))
+					
+					# Reset all variables
+					fileData = ''
+					count = 1		
 				else:
 					count += 1
 
