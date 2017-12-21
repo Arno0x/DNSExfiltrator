@@ -6,12 +6,12 @@ Author: Arno0x0x - [@Arno0x0x](http://twitter.com/Arno0x0x)
 DNSExfiltrator allows for transfering (*exfiltrate*) a file over a DNS request covert channel. This is basically a data leak testing tool allowing to exfiltrate data over a covert channel.
 
 DNSExfiltrator has to sides:
-  1. The **server side**, coming as a single python script (`dnsexfiltrator.py`), which acts as a custom DNS server, serving the payload data
+  1. The **server side**, coming as a single python script (`dnsexfiltrator.py`), which acts as a custom DNS server, receiving the file
   2. The **client side** (*victim's side*), which comes in two flavors:
   - `dnsExfiltrator.cs`: a C# script that can be compiled with `csc.exe` to provide a Windows managed executable
   - `Invoke-DNSExfiltrator.ps1`: a PowerShell script providing the exact same functionnalities by wrapping the dnsExfiltrator assembly
 
-In order for the whole thing to work **you need to own your domain name** and set the DNS record for that domain to point to the server that will run the `dnsexfiltrator.py` server side.
+In order for the whole thing to work **you must own a domain name** and set the DNS record (NS) for that domain to point to the server that will run the `dnsexfiltrator.py` server side.
 
 Features
 ----------------------
