@@ -46,7 +46,7 @@ root@kali:~# ./dnsexfiltrator.py -d mydomain.com -p password
 
 ***CLIENT SIDE***
 
-You can use **either** the compiled version **or** the PowerShell wrapper (*which is basically the same thing*). Either case, the parameters are the same.
+You can **either** use the compiled version, **or** the PowerShell wrapper (*which is basically the same thing*) **or** the JScript wrapper. In any case, the parameters are the same, with just a slight difference in the way of passing them in PowerShell.
 
 1/ Using the C# compiled Windows executable (*which you can find in the `release` directory*):
 ```
