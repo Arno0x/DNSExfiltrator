@@ -174,7 +174,7 @@ if __name__ == '__main__':
 						rc4Decryptor = RC4(args.password)
 						
 						# Save data to a file
-						outputFileName = "./output" + fileName + ".zip"
+						outputFileName = "./output/" + fileName + ".zip"
 						print color("[+] Decrypting using password [{}] and saving to output file [{}]".format(args.password,outputFileName))
 						with open(outputFileName, 'wb+') as fileHandle:
 							fileHandle.write(rc4Decryptor.binaryDecrypt(bytearray(decode(fileData))))
